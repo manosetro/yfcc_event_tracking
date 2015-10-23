@@ -69,6 +69,8 @@ public class MultiThreadedApp {
 	public static SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
 	
 	public static BlockingDeque<MultimodalClassifier> queue = new LinkedBlockingDeque<MultimodalClassifier>();
+
+	private static String graphsDir;
 	
 	public static void main(String...args) throws IOException, SolrServerException, ParseException {
 		
@@ -91,6 +93,7 @@ public class MultiThreadedApp {
 		String visualService = (String) properties.get("visual_service");
 		visualServiceClient = new ServiceClient(visualService);
 		 
+		graphsDir = (String) properties.get("graphs_dir");
 		timeslotLength = Integer.parseInt((String) properties.getOrDefault("timeslot_length", "24"));
 		structuralOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("structural_overlap_threshold", "0.5"));
 		tagOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("tags_overlap_threshold", "0.9"));
@@ -182,7 +185,7 @@ public class MultiThreadedApp {
 	        eventClient.index(eventsToSave);		// Commit to SOLR
 	        for(Event event : eventsToSave) {
 	        	Graph<String, SameEventLink> eventGraph = event.getEventGraph();
-	        	String gFile = "/second_disk/workspace/yahoogc/graphs/" + event.getId() + ".graphml";
+	        	String gFile = graphsDir + event.getId() + ".graphml";
 	        	GraphUtils.saveGraph(eventGraph, gFile);
 		        
 	        	totalClustered += event.size();
@@ -211,8 +214,8 @@ public class MultiThreadedApp {
 	        	itemsGraph.removeVertex(itemId);
 	        	itemsMap.remove(itemId);
 	        }
-	        System.out.println("Items Graph after removal: " + itemsGraph.getVertexCount() + " vertices, " + itemsGraph.getEdgeCount() + " edges.");
-	        System.out.println("Items Map after removal: " + itemsMap.size() + " items.");
+	        System.out.println("Items Graph after outdated removal: " + itemsGraph.getVertexCount() + " vertices, " + itemsGraph.getEdgeCount() + " edges.");
+	        System.out.println("Items Map after outdated removal: " + itemsMap.size() + " items.");
 	        
 	        previousItems = currentItems;
 	        
@@ -230,36 +233,12 @@ public class MultiThreadedApp {
 	        System.out.println("Events Graph: " + eventsGraph.getVertexCount() + " vertices, " + eventsGraph.getEdgeCount() + " edges.");
 	        System.out.println("Active Items in events: " + activeItems + ", max items: " + maxItems + ", average items: " + avgItems);
 	        		
-	        // Filter events of low density
-	        List<Event> eventsToRmv = new ArrayList<Event>();
-	        for(Event event : eventsGraph.getVertices()) {
-	        	if(event.getDensity() <= densityThreshold) {
-	        		// remove event due to low density 
-	        		eventsToRmv.add(event);
-	        	}
-	        }
+	        filterEventsAndItems(eventsGraph, itemsGraph, itemsMap, previousItems);
 	        
-	        if(!eventsToRmv.isEmpty()) {
-	        	for(Event e : eventsToRmv) {
-	        		eventsGraph.removeVertex(e);
-	        	}
-	        
-	        	activeItems = 0;
-	        	maxItems = 0;
-	        	avgItems = 0;
-	        	for(Event e : eventsGraph.getVertices()) {
-	        		activeItems += e.getItemsMap().size();
-	        		if(e.getItemsMap().size() > maxItems) {
-	        			maxItems = e.getItemsMap().size();
-	        		}
-	        		avgItems += e.getItemsMap().size();
-	        	}
-	        	if(eventsGraph.getVertexCount() != 0) {
-		        	avgItems = avgItems / eventsGraph.getVertexCount();
-		        }
-	        	System.out.println("Events Graph after filtering: " + eventsGraph.getVertexCount() + " vertices, " + eventsGraph.getEdgeCount() + " edges.");
-	        	System.out.println("Active Items in events: " + activeItems + ", max items: " + maxItems + ", average items: " + avgItems);
-	        }
+	        // Remove outliers
+	        outliersRemoval(previousItems, itemsGraph, itemsMap);
+	        System.out.println("Items Graph after outliers removal: " + itemsGraph.getVertexCount() + " vertices, " + itemsGraph.getEdgeCount() + " edges.");
+	        System.out.println("Items Map after outliers removal: " + itemsMap.size() + " items.");
 	        
 	        System.out.println("Total proccesed items: " + total + ", kept: " + totalFiltered +
 	        		", discarded: " + (total-totalFiltered) + ", total clustered: " + totalClustered);
@@ -297,6 +276,25 @@ public class MultiThreadedApp {
 		executorService.shutdown();
 	}
 	
+	public static int outliersRemoval(List<Item> items, Graph<String, SameEventLink> itemsGraph, Map<String, Item> itemsMap) {
+        
+        List<Item> outliersToRemove = new ArrayList<Item>();
+        for(Item item : items) {
+        	String itemId = item.getId();
+        	if(itemsGraph.getNeighborCount(itemId) == 0) {
+        		outliersToRemove.add(item);
+        	}
+        }
+        for(Item item : outliersToRemove) {
+        	items.remove(item);
+        	String itemId = item.getId();
+        	itemsGraph.removeVertex(itemId);
+        	itemsMap.remove(itemId);
+        }
+        
+        return outliersToRemove.size();
+	}
+	
 	public static List<Event> getInactiveEvents(Graph<Event, SameEventLink> eventsGraph, Date untilDate, int n) {
 		List<Event> inactiveEvents = new ArrayList<Event>();
 		
@@ -309,6 +307,52 @@ public class MultiThreadedApp {
 			}
 		}
 		return inactiveEvents;
+	}
+	
+	public static void filterEventsAndItems(Graph<Event, SameEventLink> eventsGraph, Graph<String, SameEventLink> itemsGraph,
+			Map<String, Item> itemsMap, List<Item> previousItems) {
+		 // Filter events of low density
+        List<Event> eventsToRmv = new ArrayList<Event>();
+        for(Event event : eventsGraph.getVertices()) {
+        	if(event.getDensity() <= densityThreshold) {
+        		// remove event due to low density 
+        		eventsToRmv.add(event);
+        	}
+        }
+        
+        if(!eventsToRmv.isEmpty()) {
+        	for(Event eventToRemove : eventsToRmv) {
+        		eventsGraph.removeVertex(eventToRemove);
+        		
+        		Map<String, Item> eventItems = eventToRemove.getItemsMap();
+        		if(eventItems != null) {
+        			for(Item item : eventItems.values()) {
+        				previousItems.remove(item);
+        	        	String itemId = item.getId();
+        	        	itemsGraph.removeVertex(itemId);
+        	        	itemsMap.remove(itemId);
+        			}
+        		}
+        	}
+        
+        	int activeItems = 0;
+        	int maxItems = 0;
+        	int avgItems = 0;
+        	for(Event e : eventsGraph.getVertices()) {
+        		activeItems += e.getItemsMap().size();
+        		if(e.getItemsMap().size() > maxItems) {
+        			maxItems = e.getItemsMap().size();
+        		}
+        		avgItems += e.getItemsMap().size();
+        	}
+        	if(eventsGraph.getVertexCount() != 0) {
+	        	avgItems = avgItems / eventsGraph.getVertexCount();
+	        }
+	        System.out.println("Items Graph after events filtering: " + itemsGraph.getVertexCount() + " vertices, " + itemsGraph.getEdgeCount() + " edges.");
+	        System.out.println("Items Map after events filtering: " + itemsMap.size() + " items.");
+        	System.out.println("Events Graph after filtering: " + eventsGraph.getVertexCount() + " vertices, " + eventsGraph.getEdgeCount() + " edges.");
+        	System.out.println("Active Items in events: " + activeItems + ", max items: " + maxItems + ", average items: " + avgItems);
+        }
 	}
 	
 	public static void updateItemsGraph(List<Item> currentItems, List<Item> previousItems, Graph<String, SameEventLink> itemsGraph, Map<String, Item> itemsMap) {
@@ -349,6 +393,10 @@ public class MultiThreadedApp {
 		System.out.println(futures.size() + " inter-timeslot pairs to compare.");
 		waitTasks(futures);
 		
+        // Remove outliers
+        int outliers = outliersRemoval(currentItems, itemsGraph, itemsMap);
+        System.out.println(outliers + " removed as outliers");
+        
 		long t3 = System.currentTimeMillis();
 		System.out.println((itemsGraph.getEdgeCount() - edges) + " edges for new nodes added to graph in " + (t3 - t2)/1000 + " secs.");
 		edges = itemsGraph.getEdgeCount();
@@ -367,7 +415,7 @@ public class MultiThreadedApp {
 					futures.addLast(future);
 				} 
 				catch(RejectedExecutionException | NullPointerException e) {
-					System.err.println("Exception during task submission: " + task.getId());
+					System.err.println("Exception during task submission: " + task);
 					e.printStackTrace();
 				}
 				
@@ -566,11 +614,11 @@ public class MultiThreadedApp {
 			
 			if(!item.hasMachineTags() && (item.getTitle() == null || item.getTitle().length()<10 
 					|| item.getTitleTerms() == null || item.getTitleTerms().size() < 3)
-					&& (item.getTags() == null || item.getTags().size()<2)) {
+					&& (item.getTags() == null || item.getTags().size() < 3)) {
 				continue;
 			}
 			
-			if(item.hasMachineTags() || (item.getDescription() != null && item.getDescription().length() > 11 
+			if(item.hasMachineTags() || (item.getDescription() != null && item.getDescription().length() > 12 
 					&& item.getDescriptionTerms() != null && item.getDescriptionTerms().size() > 3) || 
 					(item.getTags() != null && item.getTags().size() > 4)) {
 				
@@ -655,14 +703,14 @@ public class MultiThreadedApp {
 	
 	public static class SECalculationTask implements Callable<Integer> {
 
-		private String id;
+		//private String id;
 		
 		private Item item1, item2;
 		private Graph<String, SameEventLink> graph;
 
 		public SECalculationTask(Item item1, Item item2, Graph<String, SameEventLink> graph) {
 			
-			setId("<" + item1.getId() + " - " + item2.getId() + ">");
+			//setId("<" + item1.getId() + " - " + item2.getId() + ">");
 			
 			this.item1 = item1;
 			this.item2 = item2;
@@ -724,14 +772,16 @@ public class MultiThreadedApp {
 		}
 
 		
-		
-		public String getId() {
-			return id;
+		public String toString() {
+			return "<" + item1.getId() + " - " + item2.getId() + ">";
 		}
+		//public String getId() {
+		//	return id;
+		//}
 
-		public void setId(String id) {
-			this.id = id;
-		}
+		//public void setId(String id) {
+		//	this.id = id;
+		//}
 		
 	}
 	

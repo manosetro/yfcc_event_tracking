@@ -304,7 +304,7 @@ public class SolrEventClient {
 	}
 
 	public static void main(String...args) {
-		SolrEventClient eventClient = new SolrEventClient("http://160.40.51.16:8983/solr/events_2");
+		SolrEventClient eventClient = new SolrEventClient("http://160.40.51.16:8983/solr/predefined_events");
 		eventClient.deleteAll();
 	}
 }
