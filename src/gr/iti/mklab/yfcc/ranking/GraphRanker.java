@@ -56,8 +56,9 @@ public class GraphRanker {
 		for(String vertex : vertices) {
 			Double score = ranker.getVertexScore(vertex);
 			
-			if(score > maxScore)
+			if(score > maxScore) {
 				maxScore = score;
+			}
 			
 			verticesMap.put(vertex, score);
 		}

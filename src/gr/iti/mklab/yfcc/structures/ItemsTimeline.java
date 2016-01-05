@@ -8,11 +8,13 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -37,7 +39,6 @@ public class ItemsTimeline implements Serializable, Iterable<Entry<Long, Collect
 	}
 	
 	private Integer total = 0;
-
 	
 	public void put(String id, Date date) {
 		
@@ -161,7 +162,44 @@ public class ItemsTimeline implements Serializable, Iterable<Entry<Long, Collect
 		return Collections.max(histogram.keySet());
 	}
 	
-
+	public long getMean() {
+    	long meanTakenTime = 0L;
+    	for(Entry<Long, Collection<String>> entry : histogram.entrySet()) {
+    		meanTakenTime += (entry.getKey() * entry.getValue().size());
+    	}
+    	if(total != null) {
+    		meanTakenTime /= total;
+    	}
+    	
+    	return meanTakenTime;
+    }
+    
+    public long getMedian() {
+    	long medianTakenTime = 0;
+    	if(histogram.isEmpty()) {
+    		return medianTakenTime;
+    	}
+    	
+    	List<Long> times = new ArrayList<Long>();
+    	for(Entry<Long, Collection<String>> entry : histogram.entrySet()) {
+    		for(int i=0; i<entry.getValue().size(); i++) {
+    			times.add(entry.getKey());
+    		}
+    	}
+    	
+    	if(times.size() == 1) {
+    		return times.get(0);
+    	}
+    	
+    	Collections.sort(times);
+    	
+    	Long lower = times.get(times.size()/2-1);
+    	Long upper = times.get(times.size()/2);
+    	medianTakenTime = (lower + upper) / 2;
+    
+    	return medianTakenTime;
+    }
+    
 	@Override
 	public Iterator<Entry<Long, Collection<String>>> iterator() {
 		return histogram.entrySet().iterator();

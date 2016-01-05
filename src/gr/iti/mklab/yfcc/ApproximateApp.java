@@ -1,6 +1,6 @@
 package gr.iti.mklab.yfcc;
 
-import info.debatty.java.graphs.CallbackInterface;
+import info.debatty.java.graphs.Neighbor;
 import info.debatty.java.graphs.NeighborList;
 import info.debatty.java.graphs.Node;
 import info.debatty.java.graphs.SimilarityInterface;
@@ -14,6 +14,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -78,52 +79,11 @@ public class ApproximateApp {
 
 	private static String graphsDir;
 	
+	private static Date finalDate, sinceDate;
+	
 	public static void main(String...args) throws IOException, SolrServerException, ParseException {
 		
-		FileInputStream inStream = new FileInputStream(args[0]);
-		Properties properties = new Properties();
-		properties.load(inStream);
-		
-		useVisual = Boolean.parseBoolean((String) properties.getOrDefault("use_visual", "false"));
-		
-		String mongoHost = (String) properties.getOrDefault("mongo_host", "127.0.0.1");
-		String mongoDatabase = (String) properties.get("mongo_database");
-		dao = EventDAO.getDAO(mongoHost, mongoDatabase);
-		
-		String solrItemsCollection = (String) properties.get("solr_items_collection");
-		itemClient = new SolrItemClient(solrItemsCollection);
-		
-		String solrEventsCollection = (String) properties.get("solr_events_collection");
-		eventClient = new SolrEventClient(solrEventsCollection);
-		
-		String visualService = (String) properties.get("visual_service");
-		visualServiceClient = new ServiceClient(visualService);
-		 
-		graphsDir = (String) properties.get("graphs_dir");
-		timeslotLength = Integer.parseInt((String) properties.getOrDefault("timeslot_length", "24"));
-		structuralOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("structural_overlap_threshold", "0.5"));
-		tagOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("tags_overlap_threshold", "0.9"));
-		namedEntitiesThreshold = Integer.parseInt((String) properties.getOrDefault("named_entities_threshold", "5"));
-		densityThreshold = Double.parseDouble((String) properties.getOrDefault("density_threshold", "0.3"));
-		minClusterSize = Integer.parseInt((String) properties.getOrDefault("min_cluster_size", "15"));
-		hubAdjacentsThreshold = Integer.parseInt((String) properties.getOrDefault("hub_adjacents_threshold", "15"));
-		
-		// Load Classifiers 
-		String classifierModel = useVisual ? "textual_visual.svm" : "textual.svm";
-		for(int k=0; k<100; k++) {
-			MultimodalClassifier classifier = new MultimodalClassifier(properties.get("classifiers_directory") + classifierModel, useVisual);
-			queue.add(classifier);
-		}
-		
-		vocabulary = Vocabulary.loadFromFile((String) properties.get("vocabulary_file"));
-		System.out.println("Vocabulary loaded: " + vocabulary.documents() + " docs, " + vocabulary.size() + " terms");		
-		
-		//Date finalDate = sdf.parse("2014-01-01T00:00:00Z");
-		//Date sinceDate = sdf.parse("2006-01-01T00:00:00Z");
-		Date finalDate = sdf.parse((String) properties.get("final_date"));
-		Date sinceDate = sdf.parse((String) properties.get("since_date"));
-		
-		System.out.println("Detect and track events from " + sinceDate +  " to " + finalDate);
+		init(args[0]);
 		
 		Date untilDate = DateUtils.addHours(sinceDate, timeslotLength);
 		
@@ -157,7 +117,10 @@ public class ApproximateApp {
 			// Update items graph.
 			// Add new nodes, add new edges.
 			updateItemsGraph(currentItems, previousItems, itemsGraph, itemsMap);
-					
+			
+			// approximate update of items graph
+			//kNN(currentItems, previousItems, itemsGraph);
+			
 			long edges = itemsGraph.getEdgeCount();
 			long vertices = itemsGraph.getVertexCount();
 			System.out.println("#vertices: " + vertices + ",  #edges: " + edges);
@@ -246,8 +209,7 @@ public class ApproximateApp {
 	        System.out.println("Items Graph after outliers removal: " + itemsGraph.getVertexCount() + " vertices, " + itemsGraph.getEdgeCount() + " edges.");
 	        System.out.println("Items Map after outliers removal: " + itemsMap.size() + " items.");
 	        
-	        System.out.println("Total proccesed items: " + total + ", kept: " + totalFiltered +
-	        		", discarded: " + (total-totalFiltered) + ", total clustered: " + totalClustered);
+	        System.out.println("Total proccesed items: " + total + ", kept: " + totalFiltered + ", discarded: " + (total-totalFiltered) + ", total clustered: " + totalClustered);
 	        
 	        long t6 = System.currentTimeMillis();
 			System.out.println("Total Time: " + (t6-t0)/1000 + " secs.");
@@ -282,6 +244,51 @@ public class ApproximateApp {
 		executorService.shutdown();
 	}
 	
+	public static void init(String propsFile) throws IOException, ParseException {
+		FileInputStream inStream = new FileInputStream(propsFile);
+		Properties properties = new Properties();
+		properties.load(inStream);
+		
+		useVisual = Boolean.parseBoolean((String) properties.getOrDefault("use_visual", "false"));
+		
+		String mongoHost = (String) properties.getOrDefault("mongo_host", "127.0.0.1");
+		String mongoDatabase = (String) properties.get("mongo_database");
+		dao = EventDAO.getDAO(mongoHost, mongoDatabase);
+		
+		String solrItemsCollection = (String) properties.get("solr_items_collection");
+		itemClient = new SolrItemClient(solrItemsCollection);
+		
+		String solrEventsCollection = (String) properties.get("solr_events_collection");
+		eventClient = new SolrEventClient(solrEventsCollection);
+		
+		String visualService = (String) properties.get("visual_service");
+		visualServiceClient = new ServiceClient(visualService);
+		 
+		graphsDir = (String) properties.get("graphs_dir");
+		timeslotLength = Integer.parseInt((String) properties.getOrDefault("timeslot_length", "24"));
+		structuralOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("structural_overlap_threshold", "0.5"));
+		tagOverlapThreshold = Double.parseDouble((String) properties.getOrDefault("tags_overlap_threshold", "0.9"));
+		namedEntitiesThreshold = Integer.parseInt((String) properties.getOrDefault("named_entities_threshold", "5"));
+		densityThreshold = Double.parseDouble((String) properties.getOrDefault("density_threshold", "0.3"));
+		minClusterSize = Integer.parseInt((String) properties.getOrDefault("min_cluster_size", "15"));
+		hubAdjacentsThreshold = Integer.parseInt((String) properties.getOrDefault("hub_adjacents_threshold", "15"));
+		
+		// Load Classifiers 
+		String classifierModel = useVisual ? "textual_visual.svm" : "textual.svm";
+		for(int k=0; k<100; k++) {
+			MultimodalClassifier classifier = new MultimodalClassifier(properties.get("classifiers_directory") + classifierModel, useVisual);
+			queue.add(classifier);
+		}
+		
+		vocabulary = Vocabulary.loadFromFile((String) properties.get("vocabulary_file"));
+		System.out.println("Vocabulary loaded: " + vocabulary.documents() + " docs, " + vocabulary.size() + " terms");		
+		
+		finalDate = sdf.parse((String) properties.get("final_date"));
+		sinceDate = sdf.parse((String) properties.get("since_date"));
+		
+		System.out.println("Detect and track events from " + sinceDate +  " to " + finalDate);
+	}
+	
 	public static int outliersRemoval(List<Item> items, Graph<String, SameEventLink> itemsGraph, Map<String, Item> itemsMap) {
         
         List<Item> outliersToRemove = new ArrayList<Item>();
@@ -291,6 +298,7 @@ public class ApproximateApp {
         		outliersToRemove.add(item);
         	}
         }
+        
         for(Item item : outliersToRemove) {
         	items.remove(item);
         	String itemId = item.getId();
@@ -317,7 +325,8 @@ public class ApproximateApp {
 	
 	public static void filterEventsAndItems(Graph<Event, SameEventLink> eventsGraph, Graph<String, SameEventLink> itemsGraph,
 			Map<String, Item> itemsMap, List<Item> previousItems) {
-		 // Filter events of low density
+		
+		// Filter events of low density
         List<Event> eventsToRmv = new ArrayList<Event>();
         for(Event event : eventsGraph.getVertices()) {
         	if(event.getDensity() <= densityThreshold) {
@@ -614,6 +623,8 @@ public class ApproximateApp {
 			}
 		
 			Item item = currentItems.get(i);
+			
+			// filtering
 			if(item.getUrl() == null) {
 				continue;
 			}
@@ -708,16 +719,11 @@ public class ApproximateApp {
 	}
 	
 	public static class SECalculationTask implements Callable<Integer> {
-
-		//private String id;
 		
 		private Item item1, item2;
 		private Graph<String, SameEventLink> graph;
 
 		public SECalculationTask(Item item1, Item item2, Graph<String, SameEventLink> graph) {
-			
-			//setId("<" + item1.getId() + " - " + item2.getId() + ">");
-			
 			this.item1 = item1;
 			this.item2 = item2;
 			
@@ -781,70 +787,131 @@ public class ApproximateApp {
 		public String toString() {
 			return "<" + item1.getId() + " - " + item2.getId() + ">";
 		}
-		//public String getId() {
-		//	return id;
-		//}
-
-		//public void setId(String id) {
-		//	this.id = id;
-		//}
-		
 	}
 	
-	public static void kNN(List<Item> items, Map<String, Item> itemsMap) {
+	public static void kNN(List<Item> currentItems, List<Item> previousItems, Graph<String, SameEventLink> itemsGraph) {
        
-        int count = 1000;
-        int k = 10;
-
-        List<Node<String>> nodes = new ArrayList<Node<String>>(items.size());
-        for (Item item : items) {
-            nodes.add(new Node<String>(item.getId()));
+		long t = System.currentTimeMillis();
+		int edges = itemsGraph.getEdgeCount();
+		
+		System.out.println("Run approximate kNN for items graph update.");
+		
+		System.out.println(queue.size() + " classifiers available.");
+		
+        List<Node<Item>> nodes = new ArrayList<Node<Item>>(currentItems.size());
+        for (Item item : currentItems) {
+        	Node<Item> node = new Node<Item>(item.getId(), item);
+            nodes.add(node);
         }
-
-        SimilarityInterface<String> similarity = new SimilarityInterface<String>() {
+        for (Item item : previousItems) {
+        	Node<Item> node = new Node<Item>(item.getId(), item);
+            nodes.add(node);
+        }
+        System.out.println((nodes.size() * nodes.size()) + " pairs to compare.");
+        
+        SimilarityInterface<Item> similarityFunction = new SimilarityInterface<Item>() {
             /**
 			 * 
 			 */
 			private static final long serialVersionUID = 1L;
 
-			public double similarity(String id1, String id2) {
-				Item item1 = itemsMap.get(id1);
-				Item item2 = itemsMap.get(id2);
-                return 1.0;
+			public double similarity(Item item1, Item item2) {
+				
+				double returnedValue = 0;
+				if(!item1.hasMachineTags() && !item2.hasMachineTags() && !item1.sameLanguage(item2)) {
+					return returnedValue;
+				}
+				
+				if(itemsGraph.containsVertex(item1.getId()) && itemsGraph.containsVertex(item2.getId())) {
+					SameEventLink edge = itemsGraph.findEdge(item1.getId(), item2.getId());
+					if(edge == null) {
+						return returnedValue;
+					}
+					return edge.weight;
+				}
+				
+				if(item1.sameMachineTags(item2)) {
+					returnedValue = 1.;
+				}
+				else {
+					MultimodalClassifier classifier = null;
+					try {
+						classifier = queue.takeFirst();
+						if(useVisual && (item1.getVlad() == null || item2.getVlad() == null)) {
+							returnedValue = 0;
+						}
+						else {
+							double score = classifier.test(item1, item2);
+							if(score > 0) {
+								returnedValue = score;
+							}
+							else {
+								// same event if items have more than 4 common named entities
+								Set<String> neOverlap = item1.namedEntitiesOverlap(item2);
+								if(neOverlap != null && neOverlap.size() > 5) {
+									returnedValue = 1;
+								}
+							}
+						}
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+					finally {
+						if(classifier != null) {
+							try {
+								queue.putLast(classifier);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+						}
+					}
+				}
+                return returnedValue;
             }
         };
 
+        int k = (int) (0.05 * nodes.size());
+        
         // Instantiate and configure the algorithm
-        ThreadedNNDescent<String> builder = new ThreadedNNDescent<String>();
-        builder.setThreadCount(3);
+        ThreadedNNDescent<Item> builder = new ThreadedNNDescent<Item>();
+        builder.setThreadCount(16);
         builder.setK(k);
-        builder.setSimilarity(similarity);
-        builder.setMaxIterations(20);
-        builder.setDelta(0.1);
+        builder.setSimilarity(similarityFunction);
+        builder.setMaxIterations(50);
+        builder.setDelta(0.05);
         builder.setRho(0.5);
 
-        // Optionally, define callback
-        builder.setCallback(new CallbackInterface() {
-            @Override
-            public void call(HashMap<String, Object> data) {
-                System.out.println(data);
-            }
-        });
-
         // Run the algorithm and get computed neighbor lists
-        HashMap<Node<String>, NeighborList> graph = builder.computeGraph(nodes);
-
-        // Display neighbor lists
-        for (Node<String> n : nodes) {
-            NeighborList nl = graph.get(n);
-            System.out.print(n);
-            System.out.println(nl);
+        Map<Node<Item>, NeighborList> graph = builder.computeGraph(nodes);
+        for (Node<Item> node : nodes) {
+        	String id1 = node.id;
+        	if(!itemsGraph.containsVertex(id1)) {
+        		itemsGraph.addVertex(id1);
+        	}
+        	
+            NeighborList nl = graph.get(node);
+            Iterator<Neighbor> it = nl.iterator();
+        	while(it.hasNext()) {
+        		Neighbor neighbor = it.next();
+        		String id2 = neighbor.node.id;
+        		if(!itemsGraph.containsVertex(id2)) {
+            		itemsGraph.addVertex(id2);
+            	}
+        		
+        		SameEventLink edge = itemsGraph.findEdge(id1, id2);
+        		if(edge == null) {
+        			if(neighbor.similarity > 0) {
+        				edge = new SameEventLink(neighbor.similarity);
+        				itemsGraph.addEdge(edge, id1, id2);
+        			}
+        		}
+        	}
+            
         }
-
-        // Optionally, we can test the builder
-        // This will compute the approximate graph, and then the exact graph
-        // and compare results...
-        builder.test(nodes);
+        
+        long t2 = System.currentTimeMillis();
+		System.out.println((itemsGraph.getEdgeCount() - edges) + " edges between nodes added to graph in " + (t2 - t)/1000 + " secs.");
+		
     }
 
 }
