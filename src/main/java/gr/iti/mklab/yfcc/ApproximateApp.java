@@ -6,6 +6,7 @@ import info.debatty.java.graphs.Node;
 import info.debatty.java.graphs.SimilarityInterface;
 import info.debatty.java.graphs.build.ThreadedNNDescent;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.rmi.server.UID;
@@ -83,7 +84,14 @@ public class ApproximateApp {
 	
 	public static void main(String...args) throws IOException, SolrServerException, ParseException {
 		
-		init(args[0]);
+		if(args.length > 0) {
+			init(new File(args[0]));	
+		}
+		else {
+			ClassLoader classLoader = ApproximateApp.class.getClassLoader();
+			File file = new File(classLoader.getResource("file/test.xml").getFile());
+			init(file);
+		}
 		
 		Date untilDate = DateUtils.addHours(sinceDate, timeslotLength);
 		
@@ -236,7 +244,7 @@ public class ApproximateApp {
 		eventClient.index(eventsToSave);
         for(Event event : eventsToSave) {
         	Graph<String, SameEventLink> eventGraph = event.getEventGraph();
-        	String gFile = "/second_disk/workspace/yahoogc/graphs/" + event.getId() + ".graphml";
+        	File gFile = new File(graphsDir, event.getId() + ".graphml");
         	GraphUtils.saveGraph(eventGraph, gFile);
         }
         
@@ -244,7 +252,7 @@ public class ApproximateApp {
 		executorService.shutdown();
 	}
 	
-	public static void init(String propsFile) throws IOException, ParseException {
+	public static void init(File propsFile) throws IOException, ParseException {
 		FileInputStream inStream = new FileInputStream(propsFile);
 		Properties properties = new Properties();
 		properties.load(inStream);
