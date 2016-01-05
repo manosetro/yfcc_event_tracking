@@ -9,6 +9,7 @@ import info.debatty.java.graphs.build.ThreadedNNDescent;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.rmi.server.UID;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -85,12 +86,13 @@ public class ApproximateApp {
 	public static void main(String...args) throws IOException, SolrServerException, ParseException {
 		
 		if(args.length > 0) {
-			init(new File(args[0]));	
+			InputStream inStream = new FileInputStream(new File(args[0]));
+			init(inStream);	
 		}
 		else {
-			ClassLoader classLoader = ApproximateApp.class.getClassLoader();
-			File file = new File(classLoader.getResource("config.properties").getFile());
-			init(file);
+			ClassLoader classloader = Thread.currentThread().getContextClassLoader();
+			InputStream inStream = classloader.getResourceAsStream("config.properties");
+			init(inStream);
 		}
 		
 		Date untilDate = DateUtils.addHours(sinceDate, timeslotLength);
@@ -252,8 +254,8 @@ public class ApproximateApp {
 		executorService.shutdown();
 	}
 	
-	public static void init(File propsFile) throws IOException, ParseException {
-		FileInputStream inStream = new FileInputStream(propsFile);
+	public static void init(InputStream inStream) throws IOException, ParseException {
+		
 		Properties properties = new Properties();
 		properties.load(inStream);
 		
