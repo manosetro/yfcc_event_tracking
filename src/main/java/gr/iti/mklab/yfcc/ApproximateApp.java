@@ -89,7 +89,7 @@ public class ApproximateApp {
 		}
 		else {
 			ClassLoader classLoader = ApproximateApp.class.getClassLoader();
-			File file = new File(classLoader.getResource("file/test.xml").getFile());
+			File file = new File(classLoader.getResource("config.properties").getFile());
 			init(file);
 		}
 		
